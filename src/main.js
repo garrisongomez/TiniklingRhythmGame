@@ -25,13 +25,18 @@ import Phaser from 'phaser'
     //const BPM = 57.6;
     //const beatDuration = 60000 / BPM; // Duration of one beat in milliseconds
     //const thirdBeatOffset = beatDuration * 2; // Offset for the 3rd beat (2 beats after the first beat)
-    var rectangle;
+    var leftStick;
+    var rightStick;
+    var resultText;
     var time;
     const halfWindow = 150;
-    var perfectWindow = 75;
-    var okWindow = 150;
-    var goodWindow = 100;
+    var perfectWindow = 63;
+    var okWindow = 100;
+    var goodWindow = 85;
     var remainder;
+    const hitDisplayDuration = 200;
+    var rightStickState = { lastHitTime: -Infinity, hit: false };
+    var leftStickState = { lastHitTime: -Infinity, hit: false };
 
     function preload ()
     {
@@ -45,12 +50,15 @@ import Phaser from 'phaser'
     {
 
         this.add.image(400, 300, 'sky');
-        rectangle = this.add.rectangle(400, 300, 100, 100, 0x000000, 0.5);
+        rightStick = this.add.rectangle(400, 300, 100, 100, 0x000000, 0.5);
+        leftStick = this.add.rectangle(100, 300, 100, 100, 0x000000, 0.5);
 
 
         music = this.sound.add('tinikling');
-        
+
         cursors = this.input.keyboard.createCursorKeys();
+
+        resultText = this.add.text(400, 200, '', { fontSize: '32px', fill: '#ffffff' }).setOrigin(0.5);
 
 
         //platforms = this.physics.add.staticGroup();
@@ -61,59 +69,89 @@ import Phaser from 'phaser'
 
       
     }
-    /**
-     * Update function that gets called every frame. Checks for user input
-     */
     function update ()
     {
-        if (cursors.left.isDown){
+        const now = Date.now();
+
+        if (Phaser.Input.Keyboard.JustDown(cursors.up)) {
             music.play();
         }
-        
-        // checks if the right arrow key is held down and if music is playing.
-        // checks the current beat and the closest beat
-        if (Phaser.Input.Keyboard.JustDown(cursors.right) && music.isPlaying) {
-            const time = Math.floor((music.seek * 1000));
-            const closestBeat = getNearestBeat(time);
-            const okHigh = closestBeat + okWindow;
-            const okLow = closestBeat - okWindow;
-            const goodHigh = closestBeat + goodWindow;
-            const goodLow = closestBeat - goodWindow;
-            const perfectHigh = closestBeat + perfectWindow;
-            const perfectLow = closestBeat - perfectWindow;
 
-            if (time <= okHigh  && time >= okLow){
-    
-                //if (Math.floor(time / beatDuration) % 3 === 0) {
-                    //rectangle.setFillStyhle(0x0000ff, 0.5);
-                //}
-                rectangle.setFillStyle(0x008000, 0.5);
-                rectangle.setVisible(true);
-                if (time <=     perfectHigh && time >= perfectLow) {
-                    console.log("Perfect " + time);
+        const rightJustDown = Phaser.Input.Keyboard.JustDown(cursors.right);
+        const leftJustDown = Phaser.Input.Keyboard.JustDown(cursors.left);
+        const rightDown = cursors.right.isDown;
+        const leftDown = cursors.left.isDown;
+        const bothPressed = (rightJustDown && leftDown) || (leftJustDown && rightDown) || (rightJustDown && leftJustDown);
+        const rightOnly = rightJustDown && !leftDown;
+
+        if (music.isPlaying) {
+            const musicTime = Math.floor(music.seek * 1000);
+
+            if (bothPressed) {
+                // full counts — both keys
+                const closestBeat = getNearestBeat(musicTime, "fullCounts");
+                const diff = Math.abs(musicTime - closestBeat);
+                const hit = (diff <= okWindow);
+                rightStickState = { lastHitTime: now, hit };
+                leftStickState = { lastHitTime: now, hit };
+                if (hit) {
+                    if (diff <= perfectWindow) {
+                        resultText.setText('Perfect');
+                    }
+                    else if (diff <= goodWindow) {
+                        resultText.setText('Good');
+                    }
+                    else {
+                        resultText.setText('Ok');
+                    }
+                } else {
+                    resultText.setText('Miss');
                 }
-    
-                else if (time <= goodHigh && time >= goodLow) {
-                    console.log("Good " + time);
+            } else if (rightOnly) {
+                // and-a counts — right key only
+                const closestBeat = getNearestBeat(musicTime, "rightKey");
+                const diff = Math.abs(musicTime - closestBeat);
+                const hit = (diff <= okWindow);
+                rightStickState = { lastHitTime: now, hit };
+                if (hit) {
+                    if (diff <= perfectWindow) {
+                        resultText.setText('Perfect');
+                    }
+                    else if (diff <= goodWindow) {
+                        resultText.setText('Good');
+                    }
+                    else {
+                        resultText.setText('Ok');
+                    }
+                } else {
+                    resultText.setText('Miss');
                 }
-                else {
-                    console.log("Ok " + time);
-                }
-                //else {
-                
-                //}
-            }
-            else {
-                console.log("Miss " + time);
-                rectangle.setFillStyle(0xff0000, 0.5);
-                rectangle.setVisible(true);
             }
         }
-        else {
-            rectangle.setFillStyle(0x000000, 0.5);
-            rectangle.setVisible(false);
+
+        // Update right stick color — stays visible for hitDisplayDuration ms
+        if (now - rightStickState.lastHitTime < hitDisplayDuration) {
+            rightStick.setFillStyle(rightStickState.hit ? 0x008000 : 0xff0000, 0.5);
+            rightStick.setVisible(true);
+        } else {
+            rightStick.setFillStyle(0x000000, 0.5);
+            rightStick.setVisible(false);
         }
-       
+
+        // Clear result text when display duration expires
+        const lastHit = Math.max(rightStickState.lastHitTime, leftStickState.lastHitTime);
+        if (now - lastHit >= hitDisplayDuration) {
+            resultText.setText('');
+        }
+
+        // Update left stick color
+        if (now - leftStickState.lastHitTime < hitDisplayDuration) {
+            leftStick.setFillStyle(leftStickState.hit ? 0x008000 : 0xff0000, 0.5);
+            leftStick.setVisible(true);
+        } else {
+            leftStick.setFillStyle(0x000000, 0.5);
+            leftStick.setVisible(false);
+        }
     }
     const fullCountsMap = [
         19332, 20420, 21463, 23557, 24649, 25718, 26797, 27831, 28881, 29918,
@@ -153,19 +191,27 @@ import Phaser from 'phaser'
         114566, 114796, 115278, 115529, 115995, 116218, 116674, 116909, 117364, 117592,
         118039, 118273, 118719, 118953, 119401, 119634,
     ];
-    function getNearestBeat(time) {
+    function getNearestBeat(time, beatType) {
+        
+        let map;
+        if (beatType === "fullCounts") {
+            map = fullCountsMap;
+        }
+        else if (beatType === "rightKey") {
+            map = rightKeyMap;
+        }
         let left = 0;
-        let right = fullCountsMap.length - 1;
+        let right = map.length - 1;
 
         while (left < right) {
             const mid = Math.floor((left + right) / 2);
-            if (fullCountsMap[mid] < time) {
+            if (map[mid] < time) {
                 left = mid + 1;
             } else {
                 right = mid;
             }
         }
-        const previousBeat = fullCountsMap[Math.max(0, left - 1)];
-        const nextBeat = fullCountsMap[left];
+        const previousBeat = map[Math.max(0, left - 1)];
+        const nextBeat = map[left];
         return Math.abs(time - previousBeat) <= Math.abs(time - nextBeat) ? previousBeat : nextBeat;
     }
