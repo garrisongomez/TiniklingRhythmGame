@@ -28,15 +28,27 @@ import Phaser from 'phaser'
     var leftStick;
     var rightStick;
     var resultText;
+    var scoreText;
     var time;
+    var score;
+    var comboMultiplierText;
+    var comboText;
+    var comboLength;
+    var comboMultiplier;
     const halfWindow = 150;
     var perfectWindow = 63;
     var okWindow = 100;
     var goodWindow = 85;
     var remainder;
+    var perfectScore = 5;
+    var goodScore = 3;
+    var okScore = 1;
+    var missScore = 1;
     const hitDisplayDuration = 200;
     var rightStickState = { lastHitTime: -Infinity, hit: false };
     var leftStickState = { lastHitTime: -Infinity, hit: false };
+    var pendingRightPress = null;
+    const simultaneousGrace = 50;
 
     function preload ()
     {
@@ -53,12 +65,20 @@ import Phaser from 'phaser'
         rightStick = this.add.rectangle(400, 300, 100, 100, 0x000000, 0.5);
         leftStick = this.add.rectangle(100, 300, 100, 100, 0x000000, 0.5);
 
-
+        score = 0;
+        comboMultiplier = 1
+        comboLength = 0;
+        
         music = this.sound.add('tinikling');
 
         cursors = this.input.keyboard.createCursorKeys();
 
         resultText = this.add.text(400, 200, '', { fontSize: '32px', fill: '#ffffff' }).setOrigin(0.5);
+        scoreText = this.add.text(300, 250, score.toString(), { fontSize: '32px', fill: '#ffffff' }).setOrigin(0.75);
+        comboText = this.add.text(100, 250, comboLength.toString(),  { fontSize: '32px', fill: '#ffffff'}).setOrigin(0.25);
+        comboMultiplierText = this.add.text(200, 250, (comboMultiplier.toString() + "x"),  { fontSize: '32px', fill: '#ffffff'}).setOrigin(0.4);
+
+
 
 
         //platforms = this.physics.add.staticGroup();
@@ -81,52 +101,88 @@ import Phaser from 'phaser'
         const leftJustDown = Phaser.Input.Keyboard.JustDown(cursors.left);
         const rightDown = cursors.right.isDown;
         const leftDown = cursors.left.isDown;
-        const bothPressed = (rightJustDown && leftDown) || (leftJustDown && rightDown) || (rightJustDown && leftJustDown);
-        const rightOnly = rightJustDown && !leftDown;
+
+        // If right was pressed alone last frame and left comes in within the grace window,
+        // treat as simultaneous instead of firing right-only first.
+        const leftCompletingPair = leftJustDown && pendingRightPress !== null && (now - pendingRightPress.timestamp <= simultaneousGrace);
+        const bothPressed = (rightJustDown && leftDown) || (leftJustDown && rightDown) || (rightJustDown && leftJustDown) || leftCompletingPair;
 
         if (music.isPlaying) {
             const musicTime = Math.floor(music.seek * 1000);
 
             if (bothPressed) {
+                // Use the time from when right was pressed for accuracy when completing a pair
+                const beatTime = leftCompletingPair ? pendingRightPress.musicTime : musicTime;
+                pendingRightPress = null;
                 // full counts — both keys
-                const closestBeat = getNearestBeat(musicTime, "fullCounts");
-                const diff = Math.abs(musicTime - closestBeat);
+                const closestBeat = getNearestBeat(beatTime, "fullCounts");
+                const diff = Math.abs(beatTime - closestBeat);
                 const hit = (diff <= okWindow);
                 rightStickState = { lastHitTime: now, hit };
                 leftStickState = { lastHitTime: now, hit };
                 if (hit) {
+                    updateCombo();
                     if (diff <= perfectWindow) {
                         resultText.setText('Perfect');
+                        score += (perfectScore * comboMultiplier);
                     }
                     else if (diff <= goodWindow) {
                         resultText.setText('Good');
+                        score += (goodScore * comboMultiplier);
                     }
                     else {
                         resultText.setText('Ok');
+                        score += (okScore * comboMultiplier);
                     }
                 } else {
                     resultText.setText('Miss');
+                    score -= missScore;
+                    comboLength = 0;
+                    if (comboMultiplier > 1) {
+                        comboMultiplier -= 1;
+                    }
                 }
-            } else if (rightOnly) {
+            } else if (rightJustDown && !leftDown) {
+                // Pend the press — wait for grace window before committing to right-only
+                pendingRightPress = { musicTime, timestamp: now };
+            }
+
+            // Process an expired pending right press as right-only
+            if (!bothPressed && pendingRightPress !== null && (now - pendingRightPress.timestamp > simultaneousGrace)) {
+                const pendedTime = pendingRightPress.musicTime;
+                pendingRightPress = null;
                 // and-a counts — right key only
-                const closestBeat = getNearestBeat(musicTime, "rightKey");
-                const diff = Math.abs(musicTime - closestBeat);
+                const closestBeat = getNearestBeat(pendedTime, "rightKey");
+                const diff = Math.abs(pendedTime - closestBeat);
                 const hit = (diff <= okWindow);
                 rightStickState = { lastHitTime: now, hit };
                 if (hit) {
+                    updateCombo();
                     if (diff <= perfectWindow) {
                         resultText.setText('Perfect');
+                        score += (perfectScore * comboMultiplier);
                     }
                     else if (diff <= goodWindow) {
                         resultText.setText('Good');
+                        score += (goodScore * comboMultiplier);
                     }
                     else {
                         resultText.setText('Ok');
+                        score += (okScore * comboMultiplier);
                     }
                 } else {
                     resultText.setText('Miss');
+                    comboLength = 0;
+                    if (comboMultiplier > 1) {
+                        comboMultiplier -= 1;
+                    }
+                    score -= missScore;
                 }
             }
+
+            scoreText.setText(score.toString());
+            comboText.setText(comboLength.toString());
+            comboMultiplierText.setText(comboMultiplier.toString() + "x");
         }
 
         // Update right stick color — stays visible for hitDisplayDuration ms
@@ -152,6 +208,15 @@ import Phaser from 'phaser'
             leftStick.setFillStyle(0x000000, 0.5);
             leftStick.setVisible(false);
         }
+    }
+    function updateCombo(){
+        comboLength += 1;
+        var oldComboMultiplier = comboMultiplier;
+        if (comboLength >= 30) comboMultiplier = 4;
+        else if (comboLength >= 20) comboMultiplier = 3;
+        else if (comboLength >= 10) comboMultiplier = 2;
+        else comboMultiplier = 1;
+        if (oldComboMultiplier > comboMultiplier) comboMultiplier = oldComboMultiplier;
     }
     const fullCountsMap = [
         19332, 20420, 21463, 23557, 24649, 25718, 26797, 27831, 28881, 29918,
